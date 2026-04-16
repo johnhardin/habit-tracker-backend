@@ -3,7 +3,7 @@ import boto3
 from datetime import datetime, timezone
 import uuid
 
-dynamodb = boto3.resource('dynamodb', region_name='ap-southeast-1')
+dynamodb = boto3.resource('dynamodb', region_name='<REGION_NAME>')
 table = dynamodb.Table('habit-tracker')
 
 def lambda_handler(event, context):

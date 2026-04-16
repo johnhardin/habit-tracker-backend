@@ -2,11 +2,11 @@ import boto3
 from datetime import datetime, timezone, timedelta
 from collections import defaultdict
 
-dynamodb = boto3.resource('dynamodb', region_name='ap-southeast-1')
-ses = boto3.client('ses', region_name='ap-southeast-1')
+dynamodb = boto3.resource('dynamodb', region_name='<REGION_NAME>')
+ses = boto3.client('ses', region_name='<REGION_NAME>')
 table = dynamodb.Table('habit-tracker')
 
-FROM_EMAIL = 'chocobibi.ff@gmail.com'
+FROM_EMAIL = '<EMAIL_ADDRESS>'
 
 def lambda_handler(event, context):
     try:
