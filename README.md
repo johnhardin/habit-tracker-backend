@@ -193,5 +193,6 @@ Both use Asia/Jakarta timezone.
 - Free tier covers this project comfortably — estimated cost after free tier: ~$0.01/month for a single user
 
 ## Frontend
+**Live Demo:** habit.johnhardin.site
 
-The dashboard is a standalone HTML file that connects directly to the API Gateway endpoints. See the [habit-tracker-frontend](#) repository for the dashboard source.
+See the [habit-tracker-frontend](https://github.com/johnhardin/habit-tracker-frontend) repository for the dashboard source.
