@@ -241,8 +241,7 @@ Both use Asia/Jakarta timezone.
 ## Environment Notes
 
 - All times stored in Jakarta timezone (UTC+7)
-- SES starts in sandbox mode — only verified emails can receive messages
-- Request SES production access to send to any email address
+- **SES is in sandbox mode** — reminder emails can only be sent to email addresses individually verified in SES Console → Verified identities. This project is intended for personal use; new users who want to try it must have their email verified in SES first
 - Free tier covers this project comfortably — estimated cost after free tier: ~$0.01/month for a single user
 
 ## Frontend
