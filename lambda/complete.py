@@ -2,17 +2,17 @@ import json
 import boto3
 from datetime import datetime, timezone
 
-dynamodb = boto3.resource('dynamodb', region_name='<REGION_NAME>')
+dynamodb = boto3.resource('dynamodb', region_name='ap-southeast-1')
 table = dynamodb.Table('habit-tracker')
 
 def lambda_handler(event, context):
     try:
+        user_id = event['requestContext']['authorizer']['jwt']['claims']['sub']
         params = event.get('queryStringParameters') or {}
-        user_id = params.get('userId')
         habit_id = params.get('habitId')
         date = params.get('date')
 
-        if not all([user_id, habit_id, date]):
+        if not all([habit_id, date]):
             return response(400, 'Missing required parameters')
 
         sk = f'COMPLETION#{date}#{habit_id}'
@@ -36,6 +36,9 @@ def response(status_code, message):
         'statusCode': status_code,
         'headers': {
             'Content-Type': 'text/html',
+            'Access-Control-Allow-Origin': '*',
+            'Access-Control-Allow-Methods': 'GET,POST,DELETE,OPTIONS',
+            'Access-Control-Allow-Headers': 'Content-Type,Authorization'
         },
         'body': f'<h2>{message}</h2>'
     }

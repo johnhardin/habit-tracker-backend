@@ -1,8 +1,8 @@
 import boto3
 from datetime import datetime, timezone, timedelta
 
-dynamodb = boto3.resource('dynamodb', region_name='<REGION_NAME>')
-ses = boto3.client('ses', region_name='<REGION_NAME>')
+dynamodb = boto3.resource('dynamodb', region_name='ap-southeast-1')
+ses = boto3.client('ses', region_name='ap-southeast-1')
 table = dynamodb.Table('habit-tracker')
 
 FROM_EMAIL = '<EMAIL_ADDRESS>'

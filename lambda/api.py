@@ -3,7 +3,7 @@ import boto3
 from datetime import datetime, timezone
 import uuid
 
-dynamodb = boto3.resource('dynamodb', region_name='<REGION_NAME>')
+dynamodb = boto3.resource('dynamodb', region_name='ap-southeast-1')
 table = dynamodb.Table('habit-tracker')
 
 def lambda_handler(event, context):
@@ -24,8 +24,7 @@ def lambda_handler(event, context):
         return response(500, {'message': str(e)})
 
 def get_habits(event):
-    params = event.get('queryStringParameters') or {}
-    user_id = params.get('userId', 'fakhri')
+    user_id = event['requestContext']['authorizer']['jwt']['claims']['sub']
     
     result = table.scan(
         FilterExpression='userId = :uid AND begins_with(sk, :prefix)',
@@ -34,14 +33,14 @@ def get_habits(event):
             ':prefix': 'HABIT#'
         }
     )
-    
     habits = result.get('Items', [])
     return response(200, {'habits': habits})
 
+
 def add_habit(event):
+    user_id = event['requestContext']['authorizer']['jwt']['claims']['sub']
     body = json.loads(event.get('body', '{}'))
     
-    user_id = body.get('userId', 'fakhri')
     name = body.get('name')
     email = body.get('email')
     schedule = body.get('schedule', 'daily')
@@ -61,17 +60,16 @@ def add_habit(event):
         'schedule': schedule,
         'createdAt': datetime.now(timezone.utc).isoformat()
     }
-
     if reminder_time:
         item['reminderTime'] = reminder_time
 
     table.put_item(Item=item)
-    
     return response(201, {'message': 'Habit created', 'habitId': habit_id})
 
+
 def delete_habit(event):
+    user_id = event['requestContext']['authorizer']['jwt']['claims']['sub']
     params = event.get('queryStringParameters') or {}
-    user_id = params.get('userId', 'fakhri')
     habit_id = params.get('habitId')
     
     if not habit_id:
@@ -83,7 +81,6 @@ def delete_habit(event):
             'sk': f'HABIT#{habit_id}'
         }
     )
-    
     return response(200, {'message': 'Habit deleted'})
 
 def response(status_code, body):
@@ -93,7 +90,7 @@ def response(status_code, body):
             'Content-Type': 'application/json',
             'Access-Control-Allow-Origin': '*',
             'Access-Control-Allow-Methods': 'GET,POST,DELETE,OPTIONS',
-            'Access-Control-Allow-Headers': 'Content-Type'
+            'Access-Control-Allow-Headers': 'Content-Type,Authorization'  # ← add Authorization
         },
         'body': json.dumps(body)
     }

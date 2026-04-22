@@ -8,7 +8,11 @@ A serverless habit tracking system built on AWS. The system sends daily email re
 Dashboard (HTML/S3)
         │
         ▼
-API Gateway ──────────────────────────────┐
+Cognito User Pool
+(JWT issuer)
+        │
+        ▼
+API Gateway (JWT Authorizer) ─────────────┐
         │                                 │
         ▼                                 ▼
 habit-tracker-api Lambda          habit-tracker-complete Lambda
@@ -37,6 +41,7 @@ habit-tracker-weekly Lambda
 
 - **Lambda** — business logic, runs serverless on demand
 - **API Gateway** — public HTTP endpoints for the dashboard and email links
+- **Cognito User Pool** — user authentication and JWT token issuance
 - **DynamoDB** — single-table design storing habits and completions
 - **SES (Simple Email Service)** — sends reminder and summary emails
 - **EventBridge** — cron schedulers that trigger Lambda automatically
@@ -44,13 +49,14 @@ habit-tracker-weekly Lambda
 
 ## How It Works
 
-1. You add a habit through the dashboard with a name, email, schedule, and optional reminder time
-2. EventBridge triggers the notify Lambda every hour
-3. The notify Lambda checks each habit's schedule and reminder time against the current Jakarta time
-4. If it's time to remind and the habit isn't completed yet, an email is sent via SES
-5. The email contains an "I did it" button — clicking it hits the complete Lambda via API Gateway
-6. The complete Lambda writes a completion record to DynamoDB
-7. Every Sunday, the weekly Lambda scans the past 7 days of completions and sends a summary email
+1. You sign in through the dashboard — Cognito issues a JWT token
+2. You add a habit through the dashboard with a name, email, schedule, and optional reminder time; the JWT is sent as the `Authorization` header and the API identifies you from its `sub` claim
+3. EventBridge triggers the notify Lambda every hour
+4. The notify Lambda checks each habit's schedule and reminder time against the current Jakarta time
+5. If it's time to remind and the habit isn't completed yet, an email is sent via SES
+6. The email contains an "I did it" button — clicking it hits the complete Lambda via API Gateway with a JWT authorizer; the Lambda reads your identity from the token, not the URL
+7. The complete Lambda writes a completion record to DynamoDB
+8. Every Sunday, the weekly Lambda scans the past 7 days of completions and sends a summary email
 
 ## DynamoDB Single-Table Design
 
@@ -67,18 +73,21 @@ This pattern allows efficient querying by prefix — fetching all habits uses `b
 
 Base URL: `https://<api-gateway-id>.execute-api.ap-southeast-1.amazonaws.com`
 
+All routes except `/complete` require a Cognito JWT in the `Authorization` header. The user identity (`sub` claim) is extracted server-side — no `userId` is accepted from the client.
+
 ### Get all habits
 ```
-GET /habits?userId={userId}
+GET /habits
+Authorization: Bearer <jwt>
 ```
 
 ### Add a habit
 ```
 POST /habits
+Authorization: Bearer <jwt>
 Content-Type: application/json
 
 {
-  "userId": "fakhri",
   "name": "Morning Workout",
   "email": "you@gmail.com",
   "schedule": "daily",
@@ -94,13 +103,17 @@ Schedule options:
 
 ### Delete a habit
 ```
-DELETE /habits?userId={userId}&habitId={habitId}
+DELETE /habits?habitId={habitId}
+Authorization: Bearer <jwt>
 ```
 
 ### Mark habit as complete (used by email link)
 ```
-GET /complete?userId={userId}&habitId={habitId}&date={YYYY-MM-DD}
+GET /complete?habitId={habitId}&date={YYYY-MM-DD}
+Authorization: Bearer <jwt>
 ```
+
+The `userId` is read from the JWT `sub` claim — it is not accepted as a query parameter.
 
 ## Lambda Functions
 
@@ -113,13 +126,13 @@ Runs every hour via EventBridge. For each habit in DynamoDB it checks:
 If all checks pass, sends a reminder email via SES with an "I did it" link.
 
 ### habit-tracker-complete
-Triggered by API Gateway when the user clicks "I did it" in the email. Writes a `COMPLETION#` record to DynamoDB.
+Triggered by API Gateway when the user clicks "I did it" in the email. The route has a JWT authorizer — the `userId` is read from the token's `sub` claim, not from query parameters. Writes a `COMPLETION#` record to DynamoDB.
 
 ### habit-tracker-weekly
 Runs every Sunday via EventBridge. Scans all habits and their completion records for the past 7 days, calculates completion rate per habit and overall, then sends a summary email.
 
 ### habit-tracker-api
-Handles CRUD operations for habits via API Gateway. Supports GET, POST, and DELETE.
+Handles CRUD operations for habits via API Gateway (GET, POST, DELETE). All routes are protected by a JWT authorizer — `userId` is always sourced from the token's `sub` claim.
 
 ## Deployment
 
@@ -128,6 +141,7 @@ Handles CRUD operations for habits via API Gateway. Supports GET, POST, and DELE
 - AWS CLI configured (`aws configure`)
 - SES email verified in ap-southeast-1
 - Python 3.12
+- Cognito User Pool (for JWT issuance)
 
 ### Setup
 
@@ -166,17 +180,31 @@ aws lambda create-function \
   --region ap-southeast-1
 ```
 
-**4. Create API Gateway**
+**4. Create Cognito User Pool**
 
-Create an HTTP API with these routes, all integrated with `habit-tracker-api` Lambda:
+Create a User Pool and an App Client (no client secret). Note the User Pool ID and the issuer URL:
+```
+https://cognito-idp.ap-southeast-1.amazonaws.com/<user-pool-id>
+```
+
+**5. Create API Gateway**
+
+Create an HTTP API and attach a JWT authorizer using the Cognito issuer URL and the App Client ID as the audience.
+
+Add these routes integrated with `habit-tracker-api` Lambda, all protected by the JWT authorizer:
 - `GET /habits`
 - `POST /habits`
 - `DELETE /habits`
+
+Add the `/complete` route integrated with `habit-tracker-complete` Lambda, also protected by the JWT authorizer:
+- `GET /complete`
+
+Add a CORS preflight route:
 - `OPTIONS /{proxy+}`
 
-Enable CORS with `Access-Control-Allow-Origin: *`.
+Enable CORS with `Access-Control-Allow-Origin: *` and `Access-Control-Allow-Headers: Content-Type,Authorization`.
 
-**5. Set EventBridge schedules**
+**6. Set EventBridge schedules**
 
 | Schedule | Cron | Lambda |
 |---|---|---|
