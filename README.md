@@ -139,7 +139,7 @@ Handles CRUD operations for habits via API Gateway (GET, POST, DELETE). All rout
 ### Prerequisites
 - AWS account with free tier
 - AWS CLI configured (`aws configure`)
-- SES email verified in ap-southeast-1
+- Custom domain with DNS access (for SES domain verification)
 - Python 3.12
 - Cognito User Pool (for JWT issuance)
 
@@ -180,14 +180,35 @@ aws lambda create-function \
   --region ap-southeast-1
 ```
 
-**4. Create Cognito User Pool**
+**4. Set up SES domain**
 
-Create a User Pool and an App Client (no client secret). Note the User Pool ID and the issuer URL:
+Verify your domain in SES so emails land in inbox instead of spam.
+
+In SES Console → Verified identities → Create identity → Domain:
+- Select **Easy DKIM** with **RSA_2048_BIT** signing key
+- SES will generate 3 CNAME records — add them to your DNS
+
+Add these records to your DNS manually:
+
+| Type | Name | Value |
+|---|---|---|
+| CNAME | *(provided by SES × 3)* | *(provided by SES)* |
+| TXT | `@` | `v=spf1 include:amazonses.com ~all` |
+| TXT | `_dmarc` | `v=DMARC1; p=none; rua=mailto:you@gmail.com` |
+
+Wait for SES to show the domain as **Verified**, then set `FROM_EMAIL` in `notify.py` and `weekly.py`:
+```python
+FROM_EMAIL = 'noreply@yourdomain.com'
+```
+
+**5. Create Cognito User Pool**
+
+Create a User Pool and an App Client — choose **Single-page application (SPA)** type (no client secret). Note the User Pool ID and the issuer URL:
 ```
 https://cognito-idp.ap-southeast-1.amazonaws.com/<user-pool-id>
 ```
 
-**5. Create API Gateway**
+**6. Create API Gateway**
 
 Create an HTTP API and attach a JWT authorizer using the Cognito issuer URL and the App Client ID as the audience.
 
@@ -199,12 +220,16 @@ Add these routes integrated with `habit-tracker-api` Lambda, all protected by th
 Add the `/complete` route integrated with `habit-tracker-complete` Lambda, also protected by the JWT authorizer:
 - `GET /complete`
 
-Add a CORS preflight route:
-- `OPTIONS /{proxy+}`
+Configure CORS at the **API level** (not via a route) — go to API → Configuration → CORS:
 
-Enable CORS with `Access-Control-Allow-Origin: *` and `Access-Control-Allow-Headers: Content-Type,Authorization`.
+| Field | Value |
+|---|---|
+| Allow origin | `https://yourdomain.com` |
+| Allow headers | `Content-Type,Authorization` |
+| Allow methods | `GET,POST,DELETE,OPTIONS` |
+| Max age | `300` |
 
-**6. Set EventBridge schedules**
+**7. Set EventBridge schedules**
 
 | Schedule | Cron | Lambda |
 |---|---|---|
