@@ -73,7 +73,7 @@ This pattern allows efficient querying by prefix — fetching all habits uses `b
 
 Base URL: `https://<api-gateway-id>.execute-api.ap-southeast-1.amazonaws.com`
 
-All routes except `/complete` require a Cognito JWT in the `Authorization` header. The user identity (`sub` claim) is extracted server-side — no `userId` is accepted from the client.
+All routes require a Cognito JWT in the `Authorization` header. The user identity (`sub` claim) is extracted server-side — no `userId` is accepted from the client.
 
 ### Get all habits
 ```
