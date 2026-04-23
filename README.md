@@ -54,7 +54,7 @@ habit-tracker-weekly Lambda
 3. EventBridge triggers the notify Lambda every hour
 4. The notify Lambda checks each habit's schedule and reminder time against the current Jakarta time
 5. If it's time to remind and the habit isn't completed yet, an email is sent via SES
-6. The email contains an "I did it" button — clicking it hits the complete Lambda via API Gateway with a JWT authorizer; the Lambda reads your identity from the token, not the URL
+6. The email contains an "I did it" button — clicking it hits the complete Lambda via API Gateway
 7. The complete Lambda writes a completion record to DynamoDB
 8. Every Sunday, the weekly Lambda scans the past 7 days of completions and sends a summary email
 
