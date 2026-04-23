@@ -73,7 +73,7 @@ This pattern allows efficient querying by prefix — fetching all habits uses `b
 
 Base URL: `https://<api-gateway-id>.execute-api.ap-southeast-1.amazonaws.com`
 
-All routes require a Cognito JWT in the `Authorization` header. The user identity (`sub` claim) is extracted server-side — no `userId` is accepted from the client.
+All `/habits` routes require a Cognito JWT in the `Authorization` header. The `/complete` route has no JWT authorizer and is called directly from email links.
 
 ### Get all habits
 ```
@@ -109,11 +109,10 @@ Authorization: Bearer <jwt>
 
 ### Mark habit as complete (used by email link)
 ```
-GET /complete?habitId={habitId}&date={YYYY-MM-DD}
-Authorization: Bearer <jwt>
+GET /complete?userId={userId}&habitId={habitId}&date={YYYY-MM-DD}
 ```
 
-The `userId` is read from the JWT `sub` claim — it is not accepted as a query parameter.
+This route has no JWT authorizer — it is called directly from an email link where no session exists. The `userId`, `habitId`, and `date` are all passed as query parameters by the notify Lambda when it builds the email link.
 
 ## Lambda Functions
 
@@ -126,7 +125,7 @@ Runs every hour via EventBridge. For each habit in DynamoDB it checks:
 If all checks pass, sends a reminder email via SES with an "I did it" link.
 
 ### habit-tracker-complete
-Triggered by API Gateway when the user clicks "I did it" in the email. The route has a JWT authorizer — the `userId` is read from the token's `sub` claim, not from query parameters. Writes a `COMPLETION#` record to DynamoDB.
+Triggered by API Gateway when the user clicks "I did it" in the email. The route has **no JWT authorizer** — the email link is a plain URL with no session context. The `userId`, `habitId`, and `date` are read from query parameters. Writes a `COMPLETION#` record to DynamoDB.
 
 ### habit-tracker-weekly
 Runs every Sunday via EventBridge. Scans all habits and their completion records for the past 7 days, calculates completion rate per habit and overall, then sends a summary email.
@@ -217,7 +216,7 @@ Add these routes integrated with `habit-tracker-api` Lambda, all protected by th
 - `POST /habits`
 - `DELETE /habits`
 
-Add the `/complete` route integrated with `habit-tracker-complete` Lambda, also protected by the JWT authorizer:
+Add the `/complete` route integrated with `habit-tracker-complete` Lambda, **without** a JWT authorizer (it is called from email links with no session):
 - `GET /complete`
 
 Configure CORS at the **API level** (not via a route) — go to API → Configuration → CORS:
