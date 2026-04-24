@@ -1,5 +1,6 @@
 import json
 import boto3
+from boto3.dynamodb.conditions import Key
 from datetime import datetime, timezone
 import uuid
 
@@ -13,6 +14,8 @@ def lambda_handler(event, context):
     try:
         if method == 'GET' and path == '/habits':
             return get_habits(event)
+        elif method == 'GET' and path == '/completions':
+            return get_completions(event)
         elif method == 'POST' and path == '/habits':
             return add_habit(event)
         elif method == 'DELETE' and path == '/habits':
@@ -82,6 +85,25 @@ def delete_habit(event):
         }
     )
     return response(200, {'message': 'Habit deleted'})
+
+def get_completions(event):
+    user_id = event['requestContext']['authorizer']['jwt']['claims']['sub']
+    params = event.get('queryStringParameters') or {}
+    start_date = params.get('startDate')
+    end_date = params.get('endDate')
+
+    if not start_date or not end_date:
+        return response(400, {'message': 'startDate and endDate are required'})
+
+    result = table.query(
+        KeyConditionExpression=Key('userId').eq(user_id) & Key('sk').between(
+            f'COMPLETION#{start_date}',
+            f'COMPLETION#{end_date}#~'
+        )
+    )
+    items = result.get('Items', [])
+    return response(200, {'completions': [{'habitId': c['habitId'], 'date': c['date']} for c in items]})
+
 
 def response(status_code, body):
     return {
