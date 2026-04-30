@@ -64,10 +64,10 @@ All data lives in one table (`habit-tracker`) using a composite key pattern:
 
 | Record type | Partition key (userId) | Sort key (sk) |
 |---|---|---|
-| Habit definition | `fakhri` | `HABIT#morning-workout` |
-| Completion record | `fakhri` | `COMPLETION#2026-04-15#morning-workout` |
+| Habit definition | `a1b2c3d4-e5f6-...` | `HABIT#morning-workout` |
+| Completion record | `a1b2c3d4-e5f6-...` | `COMPLETION#2026-04-15#morning-workout` |
 
-This pattern allows efficient querying by prefix — fetching all habits uses `begins_with(sk, 'HABIT#')`, fetching completions for a specific date uses `begins_with(sk, 'COMPLETION#2026-04-15')`.
+The `userId` is the Cognito `sub` claim from the JWT token — a UUID assigned by Cognito when the user signs up. This pattern allows efficient querying by prefix — fetching all habits uses `begins_with(sk, 'HABIT#')`, fetching completions for a specific date uses `begins_with(sk, 'COMPLETION#2026-04-15')`.
 
 ## API Endpoints
 
@@ -104,6 +104,12 @@ Schedule options:
 ### Delete a habit
 ```
 DELETE /habits?habitId={habitId}
+Authorization: Bearer <jwt>
+```
+
+### Get completions for a date range
+```
+GET /completions?startDate=YYYY-MM-DD&endDate=YYYY-MM-DD
 Authorization: Bearer <jwt>
 ```
 
