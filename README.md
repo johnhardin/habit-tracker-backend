@@ -135,59 +135,24 @@ Handles CRUD operations for habits via API Gateway (GET, POST, DELETE). All rout
 
 ## Deployment
 
+Infrastructure is managed with Terraform. All 29 AWS resources (Lambda, API Gateway, DynamoDB, Cognito, EventBridge, IAM) are provisioned from a single command.
+
 ### Prerequisites
 - AWS account with free tier
 - AWS CLI configured (`aws configure`)
-- Custom domain with DNS access (for SES domain verification)
+- Terraform installed ([install guide](https://developer.hashicorp.com/terraform/install))
+- Custom domain with SES verified (DKIM, SPF, DMARC) — see SES setup below
 - Python 3.12
-- Cognito User Pool (for JWT issuance)
 
-### Setup
+### SES Domain Setup (one-time, manual)
 
-**1. Create DynamoDB table**
-```bash
-aws dynamodb create-table \
-  --table-name habit-tracker \
-  --attribute-definitions \
-    AttributeName=userId,AttributeType=S \
-    AttributeName=sk,AttributeType=S \
-  --key-schema \
-    AttributeName=userId,KeyType=HASH \
-    AttributeName=sk,KeyType=RANGE \
-  --billing-mode PAY_PER_REQUEST \
-  --region ap-southeast-1
-```
-
-**2. Create IAM role**
-
-Create a role named `habit-tracker-lambda-role` with these policies:
-- `AmazonDynamoDBFullAccess`
-- `AmazonSESFullAccess`
-- `CloudWatchLogsFullAccess`
-
-**3. Deploy Lambda functions**
-
-For each file in `lambda/`:
-```bash
-zip function.zip lambda/notify.py
-aws lambda create-function \
-  --function-name habit-tracker-notify \
-  --runtime python3.12 \
-  --role arn:aws:iam::<account-id>:role/habit-tracker-lambda-role \
-  --handler notify.lambda_handler \
-  --zip-file fileb://function.zip \
-  --region ap-southeast-1
-```
-
-**4. Set up SES domain**
-
-Verify your domain in SES so emails land in inbox instead of spam.
+SES domain verification is not managed by Terraform since DKIM DNS records must be added manually through your DNS provider.
 
 In SES Console → Verified identities → Create identity → Domain:
 - Select **Easy DKIM** with **RSA_2048_BIT** signing key
 - SES will generate 3 CNAME records — add them to your DNS
 
-Add these records to your DNS manually:
+Add these records to your DNS:
 
 | Type | Name | Value |
 |---|---|---|
@@ -195,47 +160,48 @@ Add these records to your DNS manually:
 | TXT | `@` | `v=spf1 include:amazonses.com ~all` |
 | TXT | `_dmarc` | `v=DMARC1; p=none; rua=mailto:you@gmail.com` |
 
-Wait for SES to show the domain as **Verified**, then set `FROM_EMAIL` in `notify.py` and `weekly.py`:
+Wait for SES to show the domain as **Verified**, then update `FROM_EMAIL` in `notify.py` and `weekly.py`:
 ```python
 FROM_EMAIL = 'noreply@yourdomain.com'
 ```
 
-**5. Create Cognito User Pool**
+### Deploy with Terraform
 
-Create a User Pool and an App Client — choose **Single-page application (SPA)** type (no client secret). Note the User Pool ID and the issuer URL:
+```bash
+cd terraform
+terraform init
+terraform plan
+terraform apply
 ```
-https://cognito-idp.ap-southeast-1.amazonaws.com/<user-pool-id>
+
+After apply, Terraform prints the values you need to configure the frontend:
+
+```
+api_gateway_url       = "https://xxxxxxxxxx.execute-api.ap-southeast-1.amazonaws.com"
+cognito_user_pool_id  = "ap-southeast-1_xxxxxxxxx"
+cognito_app_client_id = "xxxxxxxxxxxxxxxxxxxxxxxxxx"
+cognito_issuer_url    = "https://cognito-idp.ap-southeast-1.amazonaws.com/ap-southeast-1_xxx"
 ```
 
-**6. Create API Gateway**
+Update these values in the frontend config, then redeploy the frontend.
 
-Create an HTTP API and attach a JWT authorizer using the Cognito issuer URL and the App Client ID as the audience.
+### Updating Lambda code
 
-Add these routes integrated with `habit-tracker-api` Lambda, all protected by the JWT authorizer:
-- `GET /habits`
-- `POST /habits`
-- `DELETE /habits`
+Edit any file in `lambda/` then run:
 
-Add the `/complete` route integrated with `habit-tracker-complete` Lambda, **without** a JWT authorizer (it is called from email links with no session):
-- `GET /complete`
+```bash
+cd terraform && terraform apply
+```
 
-Configure CORS at the **API level** (not via a route) — go to API → Configuration → CORS:
+Terraform detects the change, rezips the file, and redeploys only the affected Lambda.
 
-| Field | Value |
-|---|---|
-| Allow origin | `https://yourdomain.com` |
-| Allow headers | `Content-Type,Authorization` |
-| Allow methods | `GET,POST,DELETE,OPTIONS` |
-| Max age | `300` |
+### Tear down
 
-**7. Set EventBridge schedules**
+```bash
+cd terraform && terraform destroy
+```
 
-| Schedule | Cron | Lambda |
-|---|---|---|
-| Hourly reminder | `0 * * * ? *` | `habit-tracker-notify` |
-| Weekly summary | `0 22 ? * SUN *` | `habit-tracker-weekly` |
-
-Both use Asia/Jakarta timezone.
+Deletes all 29 resources from AWS. SES domain verification is preserved since it is not managed by Terraform.
 
 ## Environment Notes
 

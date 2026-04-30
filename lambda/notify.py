@@ -1,3 +1,4 @@
+import os
 import boto3
 from datetime import datetime, timezone, timedelta
 
@@ -6,6 +7,7 @@ ses = boto3.client('ses', region_name='ap-southeast-1')
 table = dynamodb.Table('habit-tracker')
 
 FROM_EMAIL = 'noreply@johnhardin.site'
+API_BASE_URL = os.environ.get('API_BASE_URL', 'https://61y3ffttr2.execute-api.ap-southeast-1.amazonaws.com')
 JAKARTA_OFFSET = timedelta(hours=7)
 
 def lambda_handler(event, context):
@@ -75,7 +77,7 @@ def lambda_handler(event, context):
                 print(f'Already completed: {habit_name}')
                 continue
 
-            done_link = f'https://61y3ffttr2.execute-api.ap-southeast-1.amazonaws.com/complete?userId={user_id}&habitId={habit_id}&date={today_jakarta}'
+            done_link = f'{API_BASE_URL}/complete?userId={user_id}&habitId={habit_id}&date={today_jakarta}'
             send_reminder_email(user_email, habit_name, done_link, today_jakarta)
             sent += 1
             print(f'Sent reminder for {habit_name} to {user_email}')
