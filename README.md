@@ -73,7 +73,7 @@ The `userId` is the Cognito `sub` claim from the JWT token — a UUID assigned b
 
 Base URL: `https://<api-gateway-id>.execute-api.ap-southeast-1.amazonaws.com`
 
-All `/habits` routes require a Cognito JWT in the `Authorization` header. The `/complete` route has no JWT authorizer and is called directly from email links.
+All `/habits` and `/completions` routes require a Cognito JWT in the `Authorization` header. The `/complete` route has no JWT authorizer and is called directly from email links.
 
 ### Get all habits
 ```
@@ -141,7 +141,7 @@ Handles CRUD operations for habits via API Gateway (GET, POST, DELETE). All rout
 
 ## Deployment
 
-Infrastructure is managed with Terraform. All 29 AWS resources (Lambda, API Gateway, DynamoDB, Cognito, EventBridge, IAM) are provisioned from a single command.
+Infrastructure is managed with Terraform. ALL AWS resources (Lambda, API Gateway, DynamoDB, Cognito, EventBridge, IAM) are provisioned from a single command except AWS SES.
 
 ### Prerequisites
 - AWS account with free tier
