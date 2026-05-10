@@ -35,6 +35,9 @@ EventBridge (cron: every Sunday)
         ▼
 habit-tracker-weekly Lambda
 (sends weekly summary email via SES)
+
+All Lambda functions and API Gateway are monitored by CloudWatch alarms
+→ SNS → email notification on any error
 ```
 
 ## AWS Services Used
@@ -46,6 +49,8 @@ habit-tracker-weekly Lambda
 - **SES (Simple Email Service)** — sends reminder and summary emails
 - **EventBridge** — cron schedulers that trigger Lambda automatically
 - **IAM** — role-based permissions for Lambda to access DynamoDB and SES
+- **CloudWatch** — monitors Lambda errors and API Gateway 5xx, triggers alarms
+- **SNS (Simple Notification Service)** — delivers alarm email notifications
 
 ## How It Works
 
@@ -62,12 +67,16 @@ habit-tracker-weekly Lambda
 
 All data lives in one table (`habit-tracker`) using a composite key pattern:
 
-| Record type | Partition key (userId) | Sort key (sk) |
-|---|---|---|
-| Habit definition | `a1b2c3d4-e5f6-...` | `HABIT#morning-workout` |
-| Completion record | `a1b2c3d4-e5f6-...` | `COMPLETION#2026-04-15#morning-workout` |
+| Record type | Partition key (userId) | Sort key (sk) | recordType |
+|---|---|---|---|
+| Habit definition | `a1b2c3d4-e5f6-...` | `HABIT#morning-workout` | `HABIT` |
+| Completion record | `a1b2c3d4-e5f6-...` | `COMPLETION#2026-04-15#morning-workout` | *(not set)* |
 
 The `userId` is the Cognito `sub` claim from the JWT token — a UUID assigned by Cognito when the user signs up. This pattern allows efficient querying by prefix — fetching all habits uses `begins_with(sk, 'HABIT#')`, fetching completions for a specific date uses `begins_with(sk, 'COMPLETION#2026-04-15')`.
+
+### Global Secondary Index
+
+A GSI (`recordType-index`) is defined on the `recordType` attribute. Every habit item is written with `recordType = "HABIT"`. The notify Lambda queries this GSI to fetch all habits across all users without scanning the entire table.
 
 ## API Endpoints
 
@@ -123,7 +132,7 @@ This route has no JWT authorizer — it is called directly from an email link wh
 ## Lambda Functions
 
 ### habit-tracker-notify
-Runs every hour via EventBridge. For each habit in DynamoDB it checks:
+Runs every hour via EventBridge. Fetches all habits by querying the `recordType-index` GSI (paginated, handles tables larger than 1MB). For each habit it checks:
 1. Does today match the habit's schedule? (daily/weekdays/weekends/specific days)
 2. Does the current hour match the habit's reminder time? (converted from Jakarta UTC+7 to UTC)
 3. Is there already a completion record for today?
@@ -138,6 +147,20 @@ Runs every Sunday via EventBridge. Scans all habits and their completion records
 
 ### habit-tracker-api
 Handles CRUD operations for habits via API Gateway (GET, POST, DELETE). All routes are protected by a JWT authorizer — `userId` is always sourced from the token's `sub` claim.
+
+## Monitoring
+
+Five CloudWatch alarms are provisioned by Terraform. All alarms notify via SNS email when triggered.
+
+| Alarm | Metric | Threshold |
+|---|---|---|
+| `habit-tracker-api-errors` | Lambda `Errors` | ≥ 1 in 5 min |
+| `habit-tracker-complete-errors` | Lambda `Errors` | ≥ 1 in 5 min |
+| `habit-tracker-notify-errors` | Lambda `Errors` | ≥ 1 in 5 min |
+| `habit-tracker-weekly-errors` | Lambda `Errors` | ≥ 1 in 5 min |
+| `habit-tracker-apigw-5xx` | API Gateway `5xx` | ≥ 1 in 5 min |
+
+After `terraform apply`, AWS sends a confirmation email to the configured address — the link must be clicked to activate notifications.
 
 ## Deployment
 
