@@ -1,5 +1,6 @@
 import os
 import boto3
+from boto3.dynamodb.conditions import Key
 from datetime import datetime, timezone, timedelta
 
 dynamodb = boto3.resource('dynamodb', region_name='ap-southeast-1')
@@ -21,12 +22,19 @@ def lambda_handler(event, context):
 
         print(f'UTC: {now_utc.strftime("%Y-%m-%d %H:%M")} | Jakarta: {now_jakarta.strftime("%Y-%m-%d %H:%M")} | Day: {day_of_week}')
 
-        response = table.scan(
-            FilterExpression='begins_with(sk, :prefix)',
-            ExpressionAttributeValues={':prefix': 'HABIT#'}
+        habits = []
+        response = table.query(
+            IndexName='recordType-index',
+            KeyConditionExpression=Key('recordType').eq('HABIT')
         )
-
-        habits = response.get('Items', [])
+        habits.extend(response.get('Items', []))
+        while 'LastEvaluatedKey' in response:
+            response = table.query(
+                IndexName='recordType-index',
+                KeyConditionExpression=Key('recordType').eq('HABIT'),
+                ExclusiveStartKey=response['LastEvaluatedKey']
+            )
+            habits.extend(response.get('Items', []))
 
         if not habits:
             print('No habits found')

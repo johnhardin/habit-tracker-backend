@@ -28,13 +28,9 @@ def lambda_handler(event, context):
 
 def get_habits(event):
     user_id = event['requestContext']['authorizer']['jwt']['claims']['sub']
-    
-    result = table.scan(
-        FilterExpression='userId = :uid AND begins_with(sk, :prefix)',
-        ExpressionAttributeValues={
-            ':uid': user_id,
-            ':prefix': 'HABIT#'
-        }
+
+    result = table.query(
+        KeyConditionExpression=Key('userId').eq(user_id) & Key('sk').begins_with('HABIT#')
     )
     habits = result.get('Items', [])
     return response(200, {'habits': habits})
@@ -61,6 +57,7 @@ def add_habit(event):
         'name': name,
         'email': email,
         'schedule': schedule,
+        'recordType': 'HABIT',
         'createdAt': datetime.now(timezone.utc).isoformat()
     }
     if reminder_time:
