@@ -312,15 +312,6 @@ That last point is worth revisiting if the intent is a true end-of-week summary 
 - IAM policies are not least privilege yet
 - the completion route is write-only; there is no un-complete endpoint
 
-## Suggested next improvements
-
-1. replace `FullAccess` IAM attachments with resource-scoped policies
-2. move Terraform state to S3 with locking
-3. add tags, environments, and variableized alarm/subscription settings
-4. make reminder sender configuration come from Terraform-managed environment variables
-5. add a signed completion token instead of exposing raw identifiers in the email link
-6. align the weekly job timing more explicitly with Jakarta week boundaries
-
 ## Frontend
 
 The browser client lives in [habit-tracker-frontend](../habit-tracker-frontend/README.md).
