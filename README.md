@@ -1,101 +1,177 @@
 # Habit Tracker Backend
 
-A serverless habit tracking system built on AWS. The system sends daily email reminders for each habit, lets you mark habits as complete directly from the email, and sends a weekly summary every Sunday.
+Serverless AWS backend for a habit-tracking application. The system stores habits, sends reminder emails on a schedule, records completions from email links, and sends weekly summary emails.
+
+This repository is the strongest cloud/DevOps part of the project. It demonstrates managed identity, serverless compute, NoSQL data modeling, scheduled automation, monitoring, and Infrastructure as Code.
 
 ## Architecture
 
-```
-Dashboard (HTML/S3)
-        │
-        ▼
+```text
+Static frontend
+    |
+    v
 Cognito User Pool
-(JWT issuer)
-        │
-        ▼
-API Gateway (JWT Authorizer) ─────────────┐
-        │                                 │
-        ▼                                 ▼
-habit-tracker-api Lambda          habit-tracker-complete Lambda
-(add, get, delete habits)         (mark habit as done)
-        │                                 │
-        ▼                                 ▼
-    DynamoDB ◄────────────────────────────┘
-    (habit-tracker table)
-        ▲
-        │
-EventBridge (cron: hourly)
-        │
-        ▼
-habit-tracker-notify Lambda
-(sends reminder emails via SES)
-        │
-        ▼
-EventBridge (cron: every Sunday)
-        │
-        ▼
-habit-tracker-weekly Lambda
-(sends weekly summary email via SES)
+    |
+    v
+API Gateway HTTP API ------------------------------+
+    |                                              |
+    | JWT auth on protected routes                 | public route for email clicks
+    v                                              v
+habit-tracker-api Lambda                  habit-tracker-complete Lambda
+    |                                              |
+    +--------------------------+-------------------+
+                               |
+                               v
+                          DynamoDB
+                               ^
+                               |
+                  +------------+-------------+
+                  |                          |
+                  v                          v
+            EventBridge                 EventBridge
+            hourly cron                 weekly cron
+                  |                          |
+                  v                          v
+      habit-tracker-notify Lambda   habit-tracker-weekly Lambda
+                  |                          |
+                  v                          v
+                 SES                        SES
 
-All Lambda functions and API Gateway are monitored by CloudWatch alarms
-→ SNS → email notification on any error
+CloudWatch alarms -> SNS topic -> email alert
 ```
 
-## AWS Services Used
+## AWS services used
 
-- **Lambda** — business logic, runs serverless on demand
-- **API Gateway** — public HTTP endpoints for the dashboard and email links
-- **Cognito User Pool** — user authentication and JWT token issuance
-- **DynamoDB** — single-table design storing habits and completions
-- **SES (Simple Email Service)** — sends reminder and summary emails
-- **EventBridge** — cron schedulers that trigger Lambda automatically
-- **IAM** — role-based permissions for Lambda to access DynamoDB and SES
-- **CloudWatch** — monitors Lambda errors and API Gateway 5xx, triggers alarms
-- **SNS (Simple Notification Service)** — delivers alarm email notifications
+- `AWS Lambda` - API, reminder, completion, and summary logic
+- `API Gateway HTTP API` - public API entry point
+- `Amazon Cognito` - user sign-up, sign-in, and JWT issuance
+- `Amazon DynamoDB` - habit and completion storage
+- `Amazon SES` - reminder and weekly summary emails
+- `Amazon EventBridge` - scheduled triggers
+- `Amazon CloudWatch` - logs and alarms
+- `Amazon SNS` - alarm notifications
+- `IAM` - execution roles and service permissions
+- `Terraform` - infrastructure provisioning
 
-## How It Works
+## Request and job flows
 
-1. You sign in through the dashboard — Cognito issues a JWT token
-2. You add a habit through the dashboard with a name, email, schedule, and optional reminder time; the JWT is sent as the `Authorization` header and the API identifies you from its `sub` claim
-3. EventBridge triggers the notify Lambda every hour
-4. The notify Lambda checks each habit's schedule and reminder time against the current Jakarta time
-5. If it's time to remind and the habit isn't completed yet, an email is sent via SES
-6. The email contains an "I did it" button — clicking it hits the complete Lambda via API Gateway
-7. The complete Lambda writes a completion record to DynamoDB
-8. Every Sunday, the weekly Lambda scans the past 7 days of completions and sends a summary email
+### 1. Authenticated dashboard flow
 
-## DynamoDB Single-Table Design
+1. User signs in through Cognito.
+2. The frontend sends the JWT in the `Authorization` header.
+3. API Gateway validates the token with a JWT authorizer.
+4. `habit-tracker-api` reads the Cognito `sub` claim from the request context.
+5. The Lambda reads or writes habit data in DynamoDB.
 
-All data lives in one table (`habit-tracker`) using a composite key pattern:
+### 2. Reminder flow
 
-| Record type | Partition key (userId) | Sort key (sk) | recordType |
-|---|---|---|---|
-| Habit definition | `a1b2c3d4-e5f6-...` | `HABIT#morning-workout` | `HABIT` |
-| Completion record | `a1b2c3d4-e5f6-...` | `COMPLETION#2026-04-15#morning-workout` | *(not set)* |
+1. EventBridge runs `habit-tracker-notify` every hour.
+2. The Lambda queries all `HABIT` items through the GSI.
+3. For each habit, it checks:
+   - whether today matches the schedule
+   - whether the current UTC hour matches the stored Jakarta reminder hour
+   - whether the habit has already been completed today
+4. If all checks pass, it sends an SES email with a `/complete` link.
 
-The `userId` is the Cognito `sub` claim from the JWT token — a UUID assigned by Cognito when the user signs up. This pattern allows efficient querying by prefix — fetching all habits uses `begins_with(sk, 'HABIT#')`, fetching completions for a specific date uses `begins_with(sk, 'COMPLETION#2026-04-15')`.
+### 3. Completion flow
+
+1. The user clicks the email link.
+2. API Gateway routes `GET /complete` to `habit-tracker-complete`.
+3. The Lambda writes a completion record into DynamoDB.
+
+### 4. Weekly summary flow
+
+1. EventBridge runs `habit-tracker-weekly` every Sunday.
+2. The Lambda gathers the last 7 days of completion records.
+3. It calculates per-habit and overall completion percentages.
+4. It sends a summary email through SES.
+
+## Repository layout
+
+| Path | Purpose |
+|---|---|
+| `lambda/api.py` | Authenticated habit CRUD and completion queries |
+| `lambda/complete.py` | Public completion endpoint used by email links |
+| `lambda/notify.py` | Hourly reminder scheduler |
+| `lambda/weekly.py` | Weekly summary scheduler |
+| `terraform/` | AWS infrastructure definition |
+
+## DynamoDB data model
+
+The table name is `habit-tracker`.
+
+Primary key:
+
+- partition key: `userId`
+- sort key: `sk`
+
+Habit item example:
+
+```json
+{
+  "userId": "cognito-sub-uuid",
+  "sk": "HABIT#morning-workout-ab12",
+  "habitId": "morning-workout-ab12",
+  "name": "Morning Workout",
+  "email": "you@example.com",
+  "schedule": "daily",
+  "recordType": "HABIT",
+  "reminderTime": "07:00"
+}
+```
+
+Completion item example:
+
+```json
+{
+  "userId": "cognito-sub-uuid",
+  "sk": "COMPLETION#2026-05-21#morning-workout-ab12",
+  "habitId": "morning-workout-ab12",
+  "date": "2026-05-21",
+  "completedAt": "2026-05-21T01:05:00+00:00"
+}
+```
+
+### Why this design works
+
+- all user data is colocated under one partition key
+- all habits can be queried with `begins_with(sk, 'HABIT#')`
+- completion records in a date range can be queried lexicographically
+- a GSI on `recordType` allows the notify job to find all habits across users
 
 ### Global Secondary Index
 
-A GSI (`recordType-index`) is defined on the `recordType` attribute. Every habit item is written with `recordType = "HABIT"`. The notify Lambda queries this GSI to fetch all habits across all users without scanning the entire table.
+Terraform defines:
 
-## API Endpoints
+- `recordType-index` with partition key `recordType`
 
-Base URL: `https://<api-gateway-id>.execute-api.ap-southeast-1.amazonaws.com`
+Only habit items write `recordType = "HABIT"`, so the notify Lambda can query all habits without scanning the full table.
 
-All `/habits` and `/completions` routes require a Cognito JWT in the `Authorization` header. The `/complete` route has no JWT authorizer and is called directly from email links.
+## API surface
 
-### Get all habits
+Base URL:
+
+```text
+https://<api-gateway-id>.execute-api.ap-southeast-1.amazonaws.com
 ```
-GET /habits
+
+Protected routes require:
+
+```http
 Authorization: Bearer <jwt>
 ```
 
-### Add a habit
-```
-POST /habits
-Authorization: Bearer <jwt>
-Content-Type: application/json
+### `GET /habits`
 
+Returns all habits for the authenticated user.
+
+### `POST /habits`
+
+Creates a habit.
+
+Example body:
+
+```json
 {
   "name": "Morning Workout",
   "email": "you@gmail.com",
@@ -104,97 +180,89 @@ Content-Type: application/json
 }
 ```
 
-Schedule options:
-- `daily` — every day
-- `weekdays` — Monday to Friday
-- `weekends` — Saturday and Sunday
-- `specific:Mon,Wed,Fri` — specific days
+Supported schedule values:
 
-### Delete a habit
-```
-DELETE /habits?habitId={habitId}
-Authorization: Bearer <jwt>
-```
+- `daily`
+- `weekdays`
+- `weekends`
+- `specific:Mon,Wed,Fri`
 
-### Get completions for a date range
-```
-GET /completions?startDate=YYYY-MM-DD&endDate=YYYY-MM-DD
-Authorization: Bearer <jwt>
-```
+### `DELETE /habits?habitId={habitId}`
 
-### Mark habit as complete (used by email link)
-```
-GET /complete?userId={userId}&habitId={habitId}&date={YYYY-MM-DD}
-```
+Deletes a habit definition for the authenticated user.
 
-This route has no JWT authorizer — it is called directly from an email link where no session exists. The `userId`, `habitId`, and `date` are all passed as query parameters by the notify Lambda when it builds the email link.
+### `GET /completions?startDate=YYYY-MM-DD&endDate=YYYY-MM-DD`
 
-## Lambda Functions
+Returns completion records for the authenticated user in a date range.
 
-### habit-tracker-notify
-Runs every hour via EventBridge. Fetches all habits by querying the `recordType-index` GSI (paginated, handles tables larger than 1MB). For each habit it checks:
-1. Does today match the habit's schedule? (daily/weekdays/weekends/specific days)
-2. Does the current hour match the habit's reminder time? (converted from Jakarta UTC+7 to UTC)
-3. Is there already a completion record for today?
+### `GET /complete?userId={userId}&habitId={habitId}&date={YYYY-MM-DD}`
 
-If all checks pass, sends a reminder email via SES with an "I did it" link.
+Public endpoint used by the email reminder link.
 
-### habit-tracker-complete
-Triggered by API Gateway when the user clicks "I did it" in the email. The route has **no JWT authorizer** — the email link is a plain URL with no session context. The `userId`, `habitId`, and `date` are read from query parameters. Writes a `COMPLETION#` record to DynamoDB.
+This route intentionally has no JWT authorizer because it must work from an inbox click where the user has no active browser session.
 
-### habit-tracker-weekly
-Runs every Sunday via EventBridge. Scans all habits and their completion records for the past 7 days, calculates completion rate per habit and overall, then sends a summary email.
+## Terraform-managed infrastructure
 
-### habit-tracker-api
-Handles CRUD operations for habits via API Gateway (GET, POST, DELETE). All routes are protected by a JWT authorizer — `userId` is always sourced from the token's `sub` claim.
+The Terraform configuration provisions:
 
-## Monitoring
+- DynamoDB table and GSI
+- Cognito user pool and app client
+- API Gateway HTTP API
+- JWT authorizer for protected routes
+- four Lambda functions
+- EventBridge schedules and permissions
+- CloudWatch alarms
+- SNS alert topic and email subscription
 
-Five CloudWatch alarms are provisioned by Terraform. All alarms notify via SNS email when triggered.
+The Lambda packages are built with Terraform `archive_file` data sources, so a code change in `lambda/*.py` triggers a new ZIP hash and redeploys the changed function on `terraform apply`.
+
+## Monitoring and alerts
+
+Terraform provisions five CloudWatch alarms:
 
 | Alarm | Metric | Threshold |
 |---|---|---|
-| `habit-tracker-api-errors` | Lambda `Errors` | ≥ 1 in 5 min |
-| `habit-tracker-complete-errors` | Lambda `Errors` | ≥ 1 in 5 min |
-| `habit-tracker-notify-errors` | Lambda `Errors` | ≥ 1 in 5 min |
-| `habit-tracker-weekly-errors` | Lambda `Errors` | ≥ 1 in 5 min |
-| `habit-tracker-apigw-5xx` | API Gateway `5xx` | ≥ 1 in 5 min |
+| `habit-tracker-api-errors` | Lambda `Errors` | `>= 1` in 5 minutes |
+| `habit-tracker-complete-errors` | Lambda `Errors` | `>= 1` in 5 minutes |
+| `habit-tracker-notify-errors` | Lambda `Errors` | `>= 1` in 5 minutes |
+| `habit-tracker-weekly-errors` | Lambda `Errors` | `>= 1` in 5 minutes |
+| `habit-tracker-apigw-5xx` | API Gateway `5xx` | `>= 1` in 5 minutes |
 
-After `terraform apply`, AWS sends a confirmation email to the configured address — the link must be clicked to activate notifications.
+All alarms publish to an SNS topic, which then sends an email notification to the configured subscriber.
+
+## Security notes
+
+Current security properties:
+
+- protected API routes are validated by API Gateway with Cognito-issued JWTs
+- backend user identity comes from the JWT `sub` claim, not from client-supplied IDs
+- the completion route is intentionally public because it is designed for email links
+
+Current security gaps worth improving:
+
+- Lambda execution currently uses AWS-managed `FullAccess` IAM policies, which are broader than needed
+- the public `/complete` route is not signed or tokenized beyond query parameters
+- CORS currently allows `*`
+
+Those tradeoffs are acceptable for a personal learning project, but they should be tightened for a production or team environment.
 
 ## Deployment
 
-Infrastructure is managed with Terraform. ALL AWS resources (Lambda, API Gateway, DynamoDB, Cognito, EventBridge, IAM) are provisioned from a single command except AWS SES.
-
 ### Prerequisites
-- AWS account with free tier
-- AWS CLI configured (`aws configure`)
-- Terraform installed ([install guide](https://developer.hashicorp.com/terraform/install))
-- Custom domain with SES verified (DKIM, SPF, DMARC) — see SES setup below
+
+- AWS account
+- AWS CLI configured
+- Terraform installed
 - Python 3.12
+- SES verified sender domain or email
 
-### SES Domain Setup (one-time, manual)
+### SES setup
 
-SES domain verification is not managed by Terraform since DKIM DNS records must be added manually through your DNS provider.
+SES verification is still a manual prerequisite. Verify the sender domain or email address in SES before sending reminders.
 
-In SES Console → Verified identities → Create identity → Domain:
-- Select **Easy DKIM** with **RSA_2048_BIT** signing key
-- SES will generate 3 CNAME records — add them to your DNS
+If using a domain identity, add the DKIM, SPF, and DMARC records that SES gives you, then update the sender address used by the Lambdas.
 
-Add these records to your DNS:
-
-| Type | Name | Value |
-|---|---|---|
-| CNAME | *(provided by SES × 3)* | *(provided by SES)* |
-| TXT | `@` | `v=spf1 include:amazonses.com ~all` |
-| TXT | `_dmarc` | `v=DMARC1; p=none; rua=mailto:you@gmail.com` |
-
-Wait for SES to show the domain as **Verified**, then update `FROM_EMAIL` in `notify.py` and `weekly.py`:
-```python
-FROM_EMAIL = 'noreply@yourdomain.com'
-```
-
-### Deploy with Terraform
+### Deploy
 
 ```bash
 cd terraform
@@ -203,42 +271,56 @@ terraform plan
 terraform apply
 ```
 
-After apply, Terraform prints the values you need to configure the frontend:
+After apply, Terraform outputs:
 
-```
-api_gateway_url       = "https://xxxxxxxxxx.execute-api.ap-southeast-1.amazonaws.com"
-cognito_user_pool_id  = "ap-southeast-1_xxxxxxxxx"
-cognito_app_client_id = "xxxxxxxxxxxxxxxxxxxxxxxxxx"
-cognito_issuer_url    = "https://cognito-idp.ap-southeast-1.amazonaws.com/ap-southeast-1_xxx"
-```
+- API Gateway base URL
+- Cognito user pool ID
+- Cognito app client ID
+- Cognito issuer URL
 
-Update these values in the frontend config, then redeploy the frontend.
+Those frontend values must be copied into the config block in the frontend HTML files.
 
-### Updating Lambda code
-
-Edit any file in `lambda/` then run:
+### Update Lambda code
 
 ```bash
-cd terraform && terraform apply
+cd terraform
+terraform apply
 ```
 
-Terraform detects the change, rezips the file, and redeploys only the affected Lambda.
+Terraform recalculates the ZIP hash and updates only changed Lambda functions.
 
 ### Tear down
 
 ```bash
-cd terraform && terraform destroy
+cd terraform
+terraform destroy
 ```
 
-Deletes all 29 resources from AWS. SES domain verification is preserved since it is not managed by Terraform.
+## Timezone and environment assumptions
 
-## Environment Notes
+- reminder times are entered in Jakarta time (`UTC+7`)
+- the notify Lambda converts Jakarta reminder hours to UTC for scheduling
+- the weekly EventBridge rule runs at `cron(0 22 ? * SUN *)`, which aligns with Monday 05:00 Jakarta time, not midnight Sunday local time
 
-- All times stored in Jakarta timezone (UTC+7)
-- **SES is in sandbox mode** — reminder emails can only be sent to email addresses individually verified in SES Console → Verified identities. This project is intended for personal use; new users who want to try it must have their email verified in SES first
-- Free tier covers this project comfortably — estimated cost after free tier: ~$0.01/month for a single user
+That last point is worth revisiting if the intent is a true end-of-week summary in Jakarta time.
+
+## Known limitations
+
+- weekly summary logic scans habits rather than using the `recordType-index` query pattern used by the notify Lambda
+- reminder and summary sender addresses are hardcoded in the Lambda source
+- Terraform state in this workspace is local and should move to remote state for team or production use
+- IAM policies are not least privilege yet
+- the completion route is write-only; there is no un-complete endpoint
+
+## Suggested next improvements
+
+1. replace `FullAccess` IAM attachments with resource-scoped policies
+2. move Terraform state to S3 with locking
+3. add tags, environments, and variableized alarm/subscription settings
+4. make reminder sender configuration come from Terraform-managed environment variables
+5. add a signed completion token instead of exposing raw identifiers in the email link
+6. align the weekly job timing more explicitly with Jakarta week boundaries
 
 ## Frontend
-**Live Demo:** habit.johnhardin.site
 
-See the [habit-tracker-frontend](https://github.com/johnhardin/habit-tracker-frontend) repository for the dashboard source.
+The browser client lives in [habit-tracker-frontend](../habit-tracker-frontend/README.md).
