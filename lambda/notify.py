@@ -94,7 +94,7 @@ def lambda_handler(event, context):
 
     except Exception as e:
         print(f'Error: {str(e)}')
-        return {'statusCode': 500, 'body': str(e)}
+        raise
 
 def send_reminder_email(to_email, habit_name, done_link, today):
     subject = f'Reminder: {habit_name}'

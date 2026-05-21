@@ -66,7 +66,7 @@ def lambda_handler(event, context):
 
     except Exception as e:
         print(f'Error: {str(e)}')
-        return {'statusCode': 500, 'body': str(e)}
+        raise
 
 def send_weekly_email(to_email, habit_stats, week_dates):
     start_date = week_dates[-1]
