@@ -314,4 +314,5 @@ That last point is worth revisiting if the intent is a true end-of-week summary 
 
 ## Frontend
 
-([Habit-tracker-frontend](https://github.com/johnhardin/habit-tracker-frontend)).
+I'm using web client for the frontend and you can see it here. 
+[Habit-tracker-frontend](https://github.com/johnhardin/habit-tracker-frontend)
