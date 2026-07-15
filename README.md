@@ -314,4 +314,4 @@ That last point is worth revisiting if the intent is a true end-of-week summary 
 
 ## Frontend
 
-The browser client lives in [habit-tracker-frontend](../habit-tracker-frontend/README.md).
+([Habit-tracker-frontend](https://github.com/johnhardin/habit-tracker-frontend)).
